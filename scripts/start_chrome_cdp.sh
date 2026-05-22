@@ -34,7 +34,8 @@ while [ $# -gt 0 ]; do
 用法：$0 [--system|-s] [--refresh] [--profile NAME]
 
   默认             项目本地隔离 profile，全新登录（首次会被 X 风控的话改用 --system）
-  --system         首次启动从日常 Chrome 拷贝 cookies / Local State 到隔离 profile
+  --system         从日常 Chrome 拷贝完整 profile 数据（cookies、LocalStorage、IndexedDB、
+                   History 等共 18+ 项），保留隔离 profile + X 登录态
                    自动扫描所有 Chrome profile，挑含 X auth_token 的那个
   --refresh        强制重新拷贝（即使隔离 profile 里已有 cookies）
   --profile NAME   显式指定源 profile（如 "Default" / "Profile 1"），跳过自动扫描
@@ -78,12 +79,12 @@ if [ $USE_SYSTEM -eq 1 ]; then
     NEED_COPY=0
     if [ $REFRESH -eq 1 ]; then
         NEED_COPY=1
-        echo "[--refresh] 强制重新拷贝 cookies..."
-    elif [ ! -f "$USER_DATA/Local State" ]; then
+        echo "[--refresh] 强制重新拷贝 profile 数据..."
+    elif [ ! -d "$USER_DATA/Default/Local Storage" ]; then
         NEED_COPY=1
-        echo "[--system] 首次启动，从日常 Chrome 拷贝登录态..."
+        echo "[--system] 首次启动，从日常 Chrome 拷贝完整 profile 数据..."
     else
-        echo "[--system] 隔离 profile 已有 Local State，跳过拷贝（用 --refresh 强制刷新）"
+        echo "[--system] 隔离 profile 已有 Local Storage 数据，跳过拷贝（用 --refresh 强制刷新）"
     fi
 
     if [ $NEED_COPY -eq 1 ]; then
@@ -141,30 +142,67 @@ if [ $USE_SYSTEM -eq 1 ]; then
         # 主密钥在 macOS Keychain 里（per-app，不需要拷贝）。
         # 源 profile 文件名可能含空格（"Profile 1"），所以用变量包裹路径。
         # 目标永远是隔离 profile 的 Default/，让 Chrome 当默认 profile 用。
-        mkdir -p "$USER_DATA/Default/Network"
+        SRC="$SYSTEM_PROFILE/$SELECTED_PROFILE"
+        DST="$USER_DATA/Default"
+        mkdir -p "$DST/Network" "$DST/Local Storage/leveldb" "$DST/Session Storage" "$DST/IndexedDB"
         copied=0
-        # Local State 在 profile 父目录（全局），不在 profile 子目录里
-        if [ -f "$SYSTEM_PROFILE/Local State" ]; then
-            cp -f "$SYSTEM_PROFILE/Local State" "$USER_DATA/Local State"
-            copied=$((copied + 1))
-        fi
+        skipped=0
+
+        # --- 全局文件（在 profile 父目录）---
+        for f in "Local State" "First Run"; do
+            if [ -f "$SYSTEM_PROFILE/$f" ]; then
+                cp -f "$SYSTEM_PROFILE/$f" "$USER_DATA/$f"
+                copied=$((copied + 1))
+            fi
+        done
+
+        # --- 文件：认证、指纹、历史 ---
         for src_rel in \
             "Cookies" \
             "Cookies-journal" \
             "Network/Cookies" \
             "Network/Cookies-journal" \
             "Preferences" \
+            "Secure Preferences" \
             "Login Data" \
-            "Login Data-journal"
+            "Login Data-journal" \
+            "Web Data" \
+            "Web Data-journal" \
+            "History" \
+            "History-journal" \
+            "Favicons" \
+            "Favicons-journal" \
+            "Top Sites" \
+            "Top Sites-journal" \
+            "Bookmarks" \
+            "Visited Links"
         do
-            src_path="$SYSTEM_PROFILE/$SELECTED_PROFILE/$src_rel"
-            dst_path="$USER_DATA/Default/$src_rel"
+            src_path="$SRC/$src_rel"
+            dst_path="$DST/$src_rel"
             if [ -f "$src_path" ]; then
                 cp -f "$src_path" "$dst_path"
                 copied=$((copied + 1))
+            else
+                skipped=$((skipped + 1))
             fi
         done
-        echo "  ✓ 已从「$SELECTED_PROFILE」拷贝 $copied 个文件到 $USER_DATA/Default/"
+
+        # --- 目录：LocalStorage / SessionStorage / IndexedDB ---
+        for dir_rel in \
+            "Local Storage" \
+            "Session Storage" \
+            "IndexedDB"
+        do
+            src_dir="$SRC/$dir_rel"
+            dst_dir="$DST/$dir_rel"
+            if [ -d "$src_dir" ]; then
+                # 用 rsync 增量拷贝，避免每次全量覆盖（保留隔离 profile 自己产生的数据）
+                rsync -a --delete "$src_dir/" "$dst_dir/" 2>/dev/null
+                copied=$((copied + 1))
+            fi
+        done
+
+        echo "  ✓ 已从「$SELECTED_PROFILE」拷贝到 $DST/：$copied 项${skipped:+（$skipped 项不存在已跳过）}"
     fi
 
     # 清理残留 SingletonLock
@@ -189,12 +227,8 @@ mkdir -p "$(dirname "$LOG_FILE")"
     --remote-debugging-port=$PORT \
     --remote-debugging-address=127.0.0.1 \
     --user-data-dir="$USER_DATA" \
-    --disable-blink-features=AutomationControlled \
-    --exclude-switches=enable-automation \
     --no-first-run \
     --no-default-browser-check \
-    --disable-infobars \
-    --disable-features=ChromeWhatsNewUI \
     >"$LOG_FILE" 2>&1 \
     &
 CHROME_PID=$!
