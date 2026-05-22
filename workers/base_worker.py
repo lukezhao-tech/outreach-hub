@@ -1,6 +1,8 @@
 """
 Worker 基类
 """
+import asyncio
+import gc
 
 
 class BaseWorker:
@@ -20,6 +22,19 @@ class BaseWorker:
                 self.log(safe)
             except Exception:
                 pass
+
+    def _safe_asyncio_run(self, coro):
+        """worker 线程跑 asyncio.run() 期间禁用循环 GC，避免在 worker 线程
+        触发 tp_finalize → Tkapp_Call，破坏 Tcl 状态导致主线程 after 回调崩溃
+        （Tcl/Tk 9.0 + customtkinter 已知问题，引用计数清理不受影响）"""
+        gc_was_on = gc.isenabled()
+        if gc_was_on:
+            gc.disable()
+        try:
+            return asyncio.run(coro)
+        finally:
+            if gc_was_on:
+                gc.enable()
 
     def stop(self):
         self._stop = True

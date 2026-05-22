@@ -53,7 +53,7 @@ class XSenderPWWorker(BaseWorker):
 
     def run(self):
         try:
-            asyncio.run(self._async_run())
+            self._safe_asyncio_run(self._async_run())
         except Exception as e:
             self.log(f"[错误] {e}")
 
