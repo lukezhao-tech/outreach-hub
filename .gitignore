@@ -22,7 +22,6 @@ build/
 
 # Screenshots
 *.png
-!ocr_compare_screenshot.png
 
 # Credentials
 credentials.json

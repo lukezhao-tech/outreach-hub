@@ -24,10 +24,6 @@ dependencies = [
     "beautifulsoup4>=4.12.0,<5",
     # HTTP / API
     "requests>=2.31.0,<3",
-    # Web UI 后端
-    "fastapi>=0.100.0,<1",
-    "uvicorn[standard]>=0.20.0,<1",
-    "python-multipart>=0.0.6,<1",
 ]
 
 [project.optional-dependencies]
@@ -37,4 +33,3 @@ windows = [
 ]
 
 [dependency-groups]
-

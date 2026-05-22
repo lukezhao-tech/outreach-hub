@@ -12,7 +12,6 @@ Web3 项目自动化触达工具。从多种数据源导入项目信息，自动
 - **DM 发送**：
   - **X (Twitter)**：Playwright 控制浏览器，自动搜索用户并发送 DM（macOS）
   - **Telegram**：Telethon API 或 OCR 坐标点击（Windows）
-- **Web UI**：浏览器访问，局域网多电脑协作
 
 ## 安装
 
@@ -51,13 +50,6 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/lukezhao-tech/outreach-h
 ```bash
 cd outreach-hub    # 安装时 clone 的目录（通常在 home 目录下）
 ./scripts/start_chrome_cdp.sh
-```
-
-或者使用 Web UI：
-
-```bash
-cd outreach-hub
-uv run python web_server.py
 ```
 
 ### 更新到最新版
@@ -133,14 +125,6 @@ X 把脚本启动的「干净 Chrome」视作新设备，首次登录时常常**
 - 拷贝只在隔离 profile 首次为空时进行，之后启动会复用上次的状态；日常 Chrome 改密码或换号后跑 `--system --refresh` 重刷一次
 - 拷贝完成后，日常 Chrome 可以随便开，不影响 outreach-hub 这边的隔离 profile
 
-### Web UI
-
-```bash
-uv run python web_server.py
-```
-
-浏览器打开 `http://localhost:5000`，功能和桌面 GUI 一致。
-
 ## 数据流
 
 ```
@@ -163,12 +147,10 @@ send_log 表
 ```
 outreach-hub/
   main.py              # 桌面 GUI 入口
-  web_server.py        # Web UI 入口
   config.py            # 配置（凭证、路径、API）
   db.py                # 数据层（SQLite）
   workers/             # 后台任务（爬取、解析、发送）
   gui/                 # 桌面 GUI 标签页
-  web/                 # Web UI 前端
   scripts/
     install.sh             # 一键安装（给新同事用）
     install_browsers.sh    # 环境准备（install.sh 内部调用）

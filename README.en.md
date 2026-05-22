@@ -10,7 +10,6 @@ Automated outreach tool for Web3 projects. Import project info from multiple dat
 - **DM Sending**:
   - **X (Twitter)**: Playwright-driven browser automation to search users and send DMs (macOS)
   - **Telegram**: Telethon API or OCR coordinate-based clicking (Windows)
-- **Web UI**: Browser-based interface for LAN multi-machine collaboration
 
 ## Installation
 
@@ -51,13 +50,6 @@ cd outreach-hub    # the cloned directory (usually in your home directory)
 ./scripts/start_chrome_cdp.sh
 ```
 
-Or use the Web UI:
-
-```bash
-cd outreach-hub
-uv run python web_server.py
-```
-
 ## Usage
 
 ### Desktop GUI
@@ -75,14 +67,6 @@ This script will:
 2. Return to the app and click "Start Sending"
 3. Wait for the browser to open the DM page, then click "Logged In / Ready"
 4. DMs will be sent automatically one by one
-
-### Web UI
-
-```bash
-uv run python web_server.py
-```
-
-Open `http://localhost:5000` in your browser. Same functionality as the desktop GUI.
 
 ## Data Flow
 
@@ -106,12 +90,10 @@ Every step writes to local SQLite. Already-processed items are automatically ski
 ```
 outreach-hub/
   main.py              # Desktop GUI entry point
-  web_server.py        # Web UI entry point
   config.py            # Configuration (credentials, paths, APIs)
   db.py                # Data layer (SQLite)
   workers/             # Background tasks (scraping, parsing, sending)
   gui/                 # Desktop GUI tabs
-  web/                 # Web UI frontend
   scripts/
     install.sh             # One-click install (for new team members)
     install_browsers.sh    # Environment setup (called internally by install.sh)

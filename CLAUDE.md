@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Web3 Outreach Hub — Python 桌面应用（CustomTkinter GUI），用于 Web3 项目的自动化触达：从多种数据源导入项目 → 爬取官网提取 Telegram/X 链接 → 解析群管理员/离群用户 → OCR/坐标自动发送 DM。数据存储在本地 SQLite。
 
-**运行环境**：Windows 桌面（pyautogui/OCR 需要桌面环境），Python 3.9+。
+**运行环境**：Windows/macOS 桌面环境，Python 3.11+。
 
 ## 常用命令
 
@@ -17,9 +17,6 @@ uv run playwright install chromium
 
 # 启动桌面 GUI
 ./scripts/start_chrome_cdp.sh
-
-# 启动 Web UI（FastAPI + WebSocket 实时日志）
-uv run python web_server.py
 
 # 打包为 exe（PyInstaller）
 # 使用 build.ps1
@@ -49,9 +46,8 @@ send_log 表
 | 文件 | 职责 |
 |------|------|
 | `config.py` | **唯一配置文件**：所有常量、路径、凭证、API 地址 |
-| `db.py` | **唯一数据层**：全部 SQLite 读写 + API 客户端模式（`config.API_BASE` 非空时走 HTTP） |
+| `db.py` | **唯一数据层**：全部 SQLite 读写 |
 | `main.py` | 入口：`init_db()` → `App().mainloop()` |
-| `web_server.py` | FastAPI 后端：REST API + WebSocket 实时日志 + 静态文件 |
 
 ### Worker 模式
 
@@ -73,11 +69,6 @@ CustomTkinter 桌面应用，`gui/app.py` 懒加载 7 个标签页：
 📊 仪表盘、🔍 爬虫、🔬 解析、✉️ 文案、📤 发送、📋 记录、⚙️ 设置
 
 每个 Tab 类统一结构：`_build()` → `_start()` → `_run_worker()` → `_stop()`
-
-### 双模式运行
-
-- **本机模式**（`config.API_BASE=""`）：直接读写 SQLite
-- **客户端模式**（`config.API_BASE="http://192.168.x.x:5000"`）：发送相关函数自动走 HTTP 调用服务器 API，实现多电脑协作
 
 ### Workers 一览
 
