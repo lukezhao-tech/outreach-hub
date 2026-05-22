@@ -92,10 +92,55 @@ if [ $USE_SYSTEM -eq 1 ]; then
         SELECTED_PROFILE=""
         if [ -n "$EXPLICIT_PROFILE" ]; then
             if [ ! -d "$SYSTEM_PROFILE/$EXPLICIT_PROFILE" ]; then
-                echo "❌  指定的 profile 不存在：$SYSTEM_PROFILE/$EXPLICIT_PROFILE"
-                exit 1
+                mapped_profile=""
+                if command -v python3 >/dev/null 2>&1 && [ -f "$SYSTEM_PROFILE/Local State" ]; then
+                    mapped_profile=$(python3 - "$SYSTEM_PROFILE/Local State" "$EXPLICIT_PROFILE" <<'PY' || true
+import json
+import sys
+
+path, wanted = sys.argv[1], sys.argv[2].strip().lower()
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except Exception:
+    sys.exit(0)
+
+info = data.get("profile", {}).get("info_cache", {})
+for profile_dir, meta in info.items():
+    candidates = [
+        profile_dir,
+        meta.get("name", ""),
+        meta.get("gaia_name", ""),
+        meta.get("gaia_given_name", ""),
+        meta.get("user_name", ""),
+    ]
+    if wanted in {str(c).strip().lower() for c in candidates if c}:
+        print(profile_dir)
+        break
+PY
+)
+                fi
+
+                if [ -n "$mapped_profile" ] && [ -d "$SYSTEM_PROFILE/$mapped_profile" ]; then
+                    echo "  profile \"$EXPLICIT_PROFILE\" 映射到目录：$mapped_profile"
+                    SELECTED_PROFILE="$mapped_profile"
+                else
+                    echo "❌  指定的 profile 不存在：$SYSTEM_PROFILE/$EXPLICIT_PROFILE"
+                    echo ""
+                    echo "    可用 profile 目录："
+                    for profile_dir in "$SYSTEM_PROFILE/Default" "$SYSTEM_PROFILE"/Profile\ *; do
+                        [ -d "$profile_dir" ] || continue
+                        echo "      - $(basename "$profile_dir")"
+                    done
+                    echo ""
+                    echo "    提示：Chrome 显示名不一定是目录名。你这个账号可以试："
+                    echo "      $0 --system --refresh --profile \"Default\""
+                    exit 1
+                fi
             fi
-            SELECTED_PROFILE="$EXPLICIT_PROFILE"
+            if [ -z "$SELECTED_PROFILE" ]; then
+                SELECTED_PROFILE="$EXPLICIT_PROFILE"
+            fi
             echo "  使用指定 profile：$SELECTED_PROFILE"
         else
             echo "  扫描所有 Chrome profile，查找含 X auth_token 的那个..."
@@ -144,9 +189,8 @@ if [ $USE_SYSTEM -eq 1 ]; then
         # 目标永远是隔离 profile 的 Default/，让 Chrome 当默认 profile 用。
         SRC="$SYSTEM_PROFILE/$SELECTED_PROFILE"
         DST="$USER_DATA/Default"
-        mkdir -p "$DST/Network" "$DST/Local Storage/leveldb" "$DST/Session Storage" "$DST/IndexedDB"
+        mkdir -p "$USER_DATA" "$DST"
         copied=0
-        skipped=0
 
         # --- 全局文件（在 profile 父目录）---
         for f in "Local State" "First Run"; do
@@ -156,53 +200,19 @@ if [ $USE_SYSTEM -eq 1 ]; then
             fi
         done
 
-        # --- 文件：认证、指纹、历史 ---
-        for src_rel in \
-            "Cookies" \
-            "Cookies-journal" \
-            "Network/Cookies" \
-            "Network/Cookies-journal" \
-            "Preferences" \
-            "Secure Preferences" \
-            "Login Data" \
-            "Login Data-journal" \
-            "Web Data" \
-            "Web Data-journal" \
-            "History" \
-            "History-journal" \
-            "Favicons" \
-            "Favicons-journal" \
-            "Top Sites" \
-            "Top Sites-journal" \
-            "Bookmarks" \
-            "Visited Links"
-        do
-            src_path="$SRC/$src_rel"
-            dst_path="$DST/$src_rel"
-            if [ -f "$src_path" ]; then
-                cp -f "$src_path" "$dst_path"
-                copied=$((copied + 1))
-            else
-                skipped=$((skipped + 1))
-            fi
-        done
+        # --- 完整同步 profile ---
+        # 早期版本只覆盖 cookies / Local Storage / IndexedDB，容易把不同账号
+        # 的 Service Worker、GCM Store、Network Persistent State 等残留混在一起。
+        # X 的 DM 长连接对这些状态很敏感，混合 profile 常表现为
+        # connecting / disconnected 无限循环。这里用 --delete 保证隔离 profile
+        # 和所选源 profile 一致。
+        rsync -a --delete \
+            --exclude="Singleton*" \
+            --exclude="LOCK" \
+            "$SRC/" "$DST/"
+        copied=$((copied + 1))
 
-        # --- 目录：LocalStorage / SessionStorage / IndexedDB ---
-        for dir_rel in \
-            "Local Storage" \
-            "Session Storage" \
-            "IndexedDB"
-        do
-            src_dir="$SRC/$dir_rel"
-            dst_dir="$DST/$dir_rel"
-            if [ -d "$src_dir" ]; then
-                # 用 rsync 增量拷贝，避免每次全量覆盖（保留隔离 profile 自己产生的数据）
-                rsync -a --delete "$src_dir/" "$dst_dir/" 2>/dev/null
-                copied=$((copied + 1))
-            fi
-        done
-
-        echo "  ✓ 已从「$SELECTED_PROFILE」拷贝到 $DST/：$copied 项${skipped:+（$skipped 项不存在已跳过）}"
+        echo "  ✓ 已完整同步「${SELECTED_PROFILE:-未知 profile}」到 ${DST}/"
     fi
 
     # 清理残留 SingletonLock

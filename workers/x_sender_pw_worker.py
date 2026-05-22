@@ -11,7 +11,6 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db
 from workers.base_worker import BaseWorker
-from workers.browser_stealth import STEALTH_INIT_SCRIPT, EXTRA_HTTP_HEADERS
 
 # ── 选择器（基于 Twitter DM 页面实际结构）───────────────────────────────────
 DM_URL = "https://x.com/i/chat"
@@ -27,6 +26,22 @@ SEL_DM_TEXTAREA = "xpath=//*[@id='dm-main-container']//form//textarea"
 
 # 发送按钮
 SEL_SEND_BTN = "xpath=//*[@id='dm-main-container']//form//button"
+
+# X 风控/降级态的常见文案。出现这些文案时继续疯狂重试只会更像机器人。
+X_NETWORK_ERROR_SIGNALS = [
+    "cannot connect",
+    "connect to the internet",
+    "connection",
+    "network",
+    "something went wrong",
+    "try reloading",
+    "try again",
+    "无法连接",
+    "连接不上",
+    "网络",
+    "出了点问题",
+    "请重试",
+]
 
 
 class XSenderPWWorker(BaseWorker):
@@ -92,21 +107,10 @@ class XSenderPWWorker(BaseWorker):
                 self.log(f"[浏览器] 连接 Chrome CDP（端口 9222），尝试 {attempt}/3...")
                 browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
                 context = browser.contexts[0] if browser.contexts else await browser.new_context()
-                try:
-                    await context.add_init_script(STEALTH_INIT_SCRIPT)
-                except Exception:
-                    pass
-                try:
-                    await context.set_extra_http_headers(EXTRA_HTTP_HEADERS)
-                except Exception:
-                    pass
                 page = context.pages[0] if context.pages else await context.new_page()
-                try:
-                    await page.evaluate(STEALTH_INIT_SCRIPT)
-                except Exception:
-                    pass
+                await self._maybe_apply_legacy_stealth(context, page)
                 await page.bring_to_front()
-                self.log("[浏览器] 已连接（CDP 模式）✓")
+                self.log("[浏览器] 已连接（CDP 模式，使用真实 Chrome 指纹）✓")
                 return page, context, False
             except Exception as e:
                 last_err = e
@@ -127,6 +131,23 @@ class XSenderPWWorker(BaseWorker):
         self.log("─" * 50)
         return None, None, False
 
+    async def _maybe_apply_legacy_stealth(self, context, page):
+        """
+        X 对固定 UA / Sec-CH-UA / JS 指纹覆写很敏感。CDP 模式连接的是用户
+        真 Chrome，默认保留真实指纹；只有显式设置 OUTREACH_X_STEALTH=1
+        时才启用旧注入逻辑，便于临时回退。
+        """
+        if os.getenv("OUTREACH_X_STEALTH") != "1":
+            return
+        try:
+            from workers.browser_stealth import STEALTH_INIT_SCRIPT, EXTRA_HTTP_HEADERS
+            await context.add_init_script(STEALTH_INIT_SCRIPT)
+            await context.set_extra_http_headers(EXTRA_HTTP_HEADERS)
+            await page.evaluate(STEALTH_INIT_SCRIPT)
+            self.log("[浏览器] 已启用旧版 stealth 注入（OUTREACH_X_STEALTH=1）")
+        except Exception as e:
+            self.log(f"[浏览器] stealth 注入失败，继续使用真实指纹：{str(e)[:60]}")
+
     async def _send_loop(self, page):
         """主发送循环"""
         # 导航到 DM 页
@@ -137,6 +158,8 @@ class XSenderPWWorker(BaseWorker):
         except Exception as e:
             self.log(f"[错误] 无法打开 DM 页面：{str(e)[:80]}")
             return
+        if await self._page_has_x_network_error(page):
+            self.log("⚠ X DM 页面显示网络/重试错误。先在浏览器里手动刷新并确认 DM 可打开，再点击「已登录就绪」。")
 
         # 等待用户确认登录
         self.log("浏览器已打开，请确认已登录 Twitter，然后点击「已登录就绪」按钮。")
@@ -166,6 +189,9 @@ class XSenderPWWorker(BaseWorker):
                 return
             self.log(f"待发 {len(handles)} 个 X 用户")
 
+        min_delay, max_delay = self._get_dm_delay_range()
+        self.log(f"风控保护：每条发送后随机等待 {min_delay:.0f}-{max_delay:.0f}s")
+
         sent_count = 0
         skip_count = 0
 
@@ -183,10 +209,16 @@ class XSenderPWWorker(BaseWorker):
             self.log(f"[{idx+1}/{len(handles)}] {handle}")
 
             try:
-                success = await self._send_dm(page, handle)
+                result = await self._send_dm(page, handle)
             except Exception as e:
                 self.log(f"  发送异常：{str(e)[:80]}")
-                success = False
+                result = False
+
+            if result == "network_error":
+                self.log("  检测到 X DM 网络/重试错误，停止本轮发送。请手动恢复页面后再继续。")
+                break
+
+            success = result is True
 
             if success:
                 src_tag = (
@@ -205,7 +237,7 @@ class XSenderPWWorker(BaseWorker):
 
             # 随机延迟（最后一个不发）
             if idx < len(handles) - 1 and not self._stop:
-                wait = random.uniform(5, 15)
+                wait = random.uniform(min_delay, max_delay)
                 self.log(f"  等待 {wait:.1f}s...")
                 await asyncio.sleep(wait)
                 await self._wait_if_paused()
@@ -221,7 +253,10 @@ class XSenderPWWorker(BaseWorker):
         try:
             # 1. 每次都回到 DM 主页（发送完上条后在对话页，New chat 按钮不在）
             await page.goto(DM_URL, timeout=30000, wait_until="domcontentloaded")
-            await asyncio.sleep(2)
+            await asyncio.sleep(random.uniform(3.0, 5.0))
+            if await self._page_has_x_network_error(page):
+                self.log("  X DM 页显示网络/重试错误，暂停本条，避免连续触发风控")
+                return "network_error"
 
             # 2. 点击 New chat 按钮
             new_btn = page.locator(SEL_NEW_CHAT)
@@ -240,7 +275,7 @@ class XSenderPWWorker(BaseWorker):
 
             await search_input.fill(handle)
             self.log(f"  搜索：{handle}")
-            await asyncio.sleep(3)
+            await asyncio.sleep(random.uniform(3.0, 5.5))
 
             # 4. 在结果列表中精确匹配
             handle_lower = handle.lower().lstrip('@')
@@ -251,13 +286,15 @@ class XSenderPWWorker(BaseWorker):
                 return False
 
             self.log(f"  匹配：@{handle_lower}")
-            await asyncio.sleep(1)
+            await asyncio.sleep(random.uniform(1.0, 2.2))
 
             # 5. 点击 Next 按钮
-            next_btn = page.get_by_role("button", name="Next")
-            if await next_btn.count() > 0:
-                await next_btn.click()
-                await asyncio.sleep(2)
+            for label in ("Next", "下一步"):
+                next_btn = page.get_by_role("button", name=label)
+                if await next_btn.count() > 0:
+                    await next_btn.click()
+                    await asyncio.sleep(random.uniform(2.0, 3.5))
+                    break
 
             # 6. 在 textarea 输入 DM 消息
             textarea = page.locator(SEL_DM_TEXTAREA).first
@@ -267,26 +304,33 @@ class XSenderPWWorker(BaseWorker):
                 return False
 
             await textarea.click()
-            await asyncio.sleep(0.3)
-            await textarea.fill(self.message_content)
-            await asyncio.sleep(0.5 + random.uniform(0.2, 0.8))
+            await asyncio.sleep(random.uniform(0.5, 1.2))
+            try:
+                await textarea.press_sequentially(
+                    self.message_content,
+                    delay=random.randint(18, 45),
+                )
+            except Exception:
+                await textarea.fill(self.message_content)
+            await asyncio.sleep(random.uniform(0.8, 1.8))
 
             # 7. 点击发送按钮
             send_btn = page.locator(SEL_SEND_BTN).last  # form 内最后一个 button
             if await send_btn.count() > 0:
                 await send_btn.click()
                 self.log(f"  已发送")
-                await asyncio.sleep(2)
+                await asyncio.sleep(random.uniform(2.5, 4.5))
                 return True
 
             # 兜底：按 Enter 发送
             await page.keyboard.press("Enter")
             self.log(f"  已发送（Enter）")
-            await asyncio.sleep(2)
+            await asyncio.sleep(random.uniform(2.5, 4.5))
             return True
 
         except Exception as e:
             self.log(f"  发送异常：{str(e)[:80]}")
+            return False
         finally:
             # 确保关闭任何残留弹窗，回到 DM 主页面
             try:
@@ -294,7 +338,6 @@ class XSenderPWWorker(BaseWorker):
                 await asyncio.sleep(0.5)
             except Exception:
                 pass
-            return False
 
     async def _find_and_click_result(self, page, handle_lower):
         """
@@ -346,6 +389,26 @@ class XSenderPWWorker(BaseWorker):
         return False
 
     # ── 工具方法 ────────────────────────────────────────────────────────
+    async def _page_has_x_network_error(self, page):
+        """检测 X 是否进入网络错误/重试/降级态。"""
+        try:
+            body = (await page.locator("body").inner_text(timeout=2500)).lower()
+        except Exception:
+            return False
+        return any(sig in body for sig in X_NETWORK_ERROR_SIGNALS)
+
+    @staticmethod
+    def _get_dm_delay_range():
+        """发送间隔可通过 settings 表覆盖，默认更保守。"""
+        try:
+            min_delay = float(db.get_setting("x_dm_min_delay_seconds", "30") or 30)
+            max_delay = float(db.get_setting("x_dm_max_delay_seconds", "90") or 90)
+        except Exception:
+            min_delay, max_delay = 30.0, 90.0
+        min_delay = max(10.0, min_delay)
+        max_delay = max(min_delay + 5.0, max_delay)
+        return min_delay, max_delay
+
     @staticmethod
     def _normalize_handle(handle):
         """统一 handle 格式：去掉 @ 和 URL 前缀，返回纯用户名"""

@@ -1,102 +1,146 @@
 # Web3 Outreach Hub
 
-Automated outreach tool for Web3 projects. Import project info from multiple data sources, automatically scrape official websites for Telegram / X links, parse group admins, then send bulk DMs via TG / X.
+Web3 Outreach Hub is a local desktop GUI app for Web3 outreach workflows: importing projects, scraping websites, collecting Telegram / X contacts, managing templates, and sending DMs. Data is stored locally in SQLite.
 
 ## Features
 
-- **Data Import**: Batch import projects from CrunchBase, RootData, CryptoRank, ChainScope, and more
-- **Website Scraping**: Auto-scrape project websites using Playwright to extract TG group links and X links
-- **TG Parsing**: Parse group admins and left users from small groups via Telethon
-- **DM Sending**:
-  - **X (Twitter)**: Playwright-driven browser automation to search users and send DMs (macOS)
-  - **Telegram**: Telethon API or OCR coordinate-based clicking (Windows)
+- Import projects from CrunchBase, RootData, CryptoRank, ChainScope, campaign APIs, Excel, and CSV
+- Scrape official websites for Telegram groups, X handles, and emails
+- Parse Telegram admins and left users with Telethon
+- Search X people profiles for CEO / CMO / Growth / Founder contacts
+- Manage Telegram / X / Email templates in the GUI
+- Send Telegram, X, and Email outreach from the desktop app
 
-## Installation
+## Install
 
-### 1. Install Google Chrome
-
-X DM sending requires Google Chrome. Install it first:
+Install Google Chrome first:
 
 [Download Google Chrome](https://www.google.com/chrome/)
 
-### 2. One-Click Install
-
-Copy and run the following command in your terminal:
+Then run:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lukezhao-tech/outreach-hub/main/scripts/install.sh)"
 ```
 
-This script automatically completes all of the following steps:
-
-| Step | Description |
-|------|-------------|
-| Clone repo | Pull the latest code from GitHub |
-| Check Chrome | Verify Google Chrome is installed |
-| Install uv | Auto-download and install uv if not present |
-| Install Python | Download Python 3.11 via uv (no system Python required) |
-| Install dependencies | `uv sync` to install all pip packages |
-| Install browser engine | `playwright install chromium` for website scraping |
-| Environment verification | Check tkinter, customtkinter, playwright availability |
-
-The whole process takes about 2-3 minutes depending on network speed. **Only needs to be run once.**
-
-### After Installation
-
-The install script automatically enters the `outreach-hub` directory. For daily startup (each time you open a new terminal):
+Daily startup:
 
 ```bash
-cd outreach-hub    # the cloned directory (usually in your home directory)
+cd ~/outreach-hub
 ./scripts/start_chrome_cdp.sh
 ```
 
-## Usage
+## Recommended X Startup
 
-### Desktop GUI
+X is sensitive to new devices and automation contexts. The most reliable startup mode is to sync your regular Chrome profile into the app's isolated CDP profile:
 
 ```bash
-./scripts/start_chrome_cdp.sh
+cd ~/outreach-hub
+./scripts/start_chrome_cdp.sh --system --refresh --profile "you@example.com"
 ```
 
-This script will:
-1. Start Chrome in CDP mode (runs in background)
-2. Launch the desktop GUI application
+`--profile` accepts:
 
-**X DM Sending Flow**:
-1. Log in to Twitter (`x.com`) in the Chrome window that pops up
-2. Return to the app and click "Start Sending"
-3. Wait for the browser to open the DM page, then click "Logged In / Ready"
-4. DMs will be sent automatically one by one
+| Type | Example |
+|------|---------|
+| Chrome profile directory | `Default`, `Profile 1` |
+| Chrome display name | `Luke Zhao`, `taskon.xyz` |
+| Login email | `lukezhao@taskon.xyz` |
+
+Before running this command, fully quit your regular Chrome with `Command + Q`. Closing windows is not enough because Chrome may keep profile databases locked.
+
+## X Anti-Bot Notes
+
+The current version reduces X friction by:
+
+- Using the real Chrome fingerprint in CDP mode instead of injecting a fixed UA / Client Hints profile
+- Fully syncing the selected Chrome profile on `--system --refresh`, preventing stale mixed-account browser state
+- Slowing down X DM sending with a default random delay of `30-90s` between messages
+- Typing DM text progressively instead of instant-filling it
+- Stopping the current run if X DM shows `connecting / disconnected`, network errors, or retry pages
+
+If `https://x.com/i/chat` loops between `connecting` and `disconnected`:
+
+1. Quit regular Chrome with `Command + Q`
+2. Run:
+
+   ```bash
+   cd ~/outreach-hub
+   ./scripts/start_chrome_cdp.sh --system --refresh --profile "your Chrome email or profile name"
+   ```
+
+3. In the launched Chrome, manually open:
+
+   ```text
+   https://x.com/i/chat
+   ```
+
+4. Start sending only after the DM page connects normally
+
+If the same account cannot open DM in regular Chrome either, the issue is likely account-side or network-side.
+
+## GUI Workflow
+
+1. **Settings**: configure Telegram API credentials, Gmail App Password, DeepSeek keys, OCR / coordinate settings, and DM cooldown.
+2. **Scraper**: import or scrape projects from the supported sources. Use a unique `source tag` for each batch.
+3. **Parser**: parse Telegram admins or left users.
+4. **Messages**: create and activate outreach templates.
+5. **Sender**: send Telegram, X project-handle, X key-person, or Email messages.
+
+## Update
+
+```bash
+cd ~/outreach-hub
+git pull
+uv sync
+```
+
+After changing X accounts or Chrome profiles, refresh the synced profile:
+
+```bash
+./scripts/start_chrome_cdp.sh --system --refresh --profile "your Chrome email or profile name"
+```
 
 ## Data Flow
 
-```
-Data source import → projects table
+```text
+Project import -> projects
     |
-    v  Scrape websites
-tg_links table + x_links table
+    v
+Website scraping -> tg_links / x_links / emails
     |
-    v  Parse group info
-tg_handles table + tg_left_users table
+    v
+Telegram parsing -> tg_contacts / tg_left_users
     |
-    v  Send DMs
-send_log table
+    v
+X people search -> x_contacts
+    |
+    v
+Sending -> send_log
 ```
 
-Every step writes to local SQLite. Already-processed items are automatically skipped on restart.
+Everything is stored in `data/outreach.db`.
 
-## Directory Structure
+## Project Structure
 
-```
+```text
 outreach-hub/
-  main.py              # Desktop GUI entry point
-  config.py            # Configuration (credentials, paths, APIs)
-  db.py                # Data layer (SQLite)
-  workers/             # Background tasks (scraping, parsing, sending)
-  gui/                 # Desktop GUI tabs
+  main.py                  # Desktop GUI entry
+  config.py                # Paths and defaults
+  db.py                    # SQLite data layer
+  gui/                     # CustomTkinter tabs
+  workers/                 # Scraping, parsing, sending workers
   scripts/
-    install.sh             # One-click install (for new team members)
-    install_browsers.sh    # Environment setup (called internally by install.sh)
-    start_chrome_cdp.sh    # Daily startup (Chrome + GUI)
-  data/                # Database, sessions (auto-created, not version-controlled)
+    install.sh             # One-click install
+    install_browsers.sh    # Dependency and browser setup
+    start_chrome_cdp.sh    # Start Chrome CDP + GUI
+  data/                    # Local database and sessions
 ```
+
+## Android Companion
+
+For stronger X anti-bot cases, X people search and X DM sending can be moved to the Android real-device version:
+
+[outreach-hub-android](https://github.com/lukezhao-tech/outreach-hub-android)
+
+The desktop and Android versions share `data/outreach.db`.

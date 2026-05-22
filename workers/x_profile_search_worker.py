@@ -26,7 +26,6 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import db
 from workers.base_worker import BaseWorker
-from workers.browser_stealth import STEALTH_INIT_SCRIPT, EXTRA_HTTP_HEADERS
 
 # ── 角色关键词 ────────────────────────────────────────────────────────────────
 ROLE_KEYWORDS = {
@@ -150,21 +149,10 @@ class XProfileSearchWorker(BaseWorker):
                 self.log(f"[浏览器] 连接 Chrome CDP（端口 9222），尝试 {attempt}/3...")
                 browser = await p.chromium.connect_over_cdp("http://127.0.0.1:9222")
                 context = browser.contexts[0] if browser.contexts else await browser.new_context()
-                try:
-                    await context.add_init_script(STEALTH_INIT_SCRIPT)
-                except Exception:
-                    pass
-                try:
-                    await context.set_extra_http_headers(EXTRA_HTTP_HEADERS)
-                except Exception:
-                    pass
                 page = context.pages[0] if context.pages else await context.new_page()
-                try:
-                    await page.evaluate(STEALTH_INIT_SCRIPT)
-                except Exception:
-                    pass
+                await self._maybe_apply_legacy_stealth(context, page)
                 await page.bring_to_front()
-                self.log("[浏览器] 已连接（CDP 模式）✓")
+                self.log("[浏览器] 已连接（CDP 模式，使用真实 Chrome 指纹）✓")
                 return page, context, False
             except Exception as e:
                 last_err = e
@@ -184,6 +172,23 @@ class XProfileSearchWorker(BaseWorker):
         self.log("  3. 回到本程序，重新点「▶ 开始搜索」")
         self.log("─" * 50)
         return None, None, False
+
+    async def _maybe_apply_legacy_stealth(self, context, page):
+        """
+        X 关键人搜索也连真实 Chrome。默认不再注入固定 UA/Client Hints，
+        避免真实 Chrome 版本和伪装指纹不一致；设置 OUTREACH_X_STEALTH=1
+        可临时恢复旧逻辑。
+        """
+        if os.getenv("OUTREACH_X_STEALTH") != "1":
+            return
+        try:
+            from workers.browser_stealth import STEALTH_INIT_SCRIPT, EXTRA_HTTP_HEADERS
+            await context.add_init_script(STEALTH_INIT_SCRIPT)
+            await context.set_extra_http_headers(EXTRA_HTTP_HEADERS)
+            await page.evaluate(STEALTH_INIT_SCRIPT)
+            self.log("[浏览器] 已启用旧版 stealth 注入（OUTREACH_X_STEALTH=1）")
+        except Exception as e:
+            self.log(f"[浏览器] stealth 注入失败，继续使用真实指纹：{str(e)[:60]}")
 
     # ── 主循环 ────────────────────────────────────────────────────────────────
 

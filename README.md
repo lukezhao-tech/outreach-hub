@@ -2,22 +2,25 @@
 
 > [English version](README.en.md)
 
-Web3 项目自动化触达工具。从多种数据源导入项目信息，自动爬取官网提取 Telegram / X 链接，解析群管理员，然后通过 TG / X DM 批量发送消息。
+Web3 Outreach Hub 是一个本地桌面 GUI 工具，用来把 Web3 项目发现、官网爬取、Telegram / X 联系人整理、文案管理和 DM 发送串成一条自动化流程。所有数据存储在本机 SQLite，主要入口是桌面 GUI。
 
-## 功能
+## 功能概览
 
-- **数据导入**：从 CrunchBase、RootData、CryptoRank、ChainScope 等来源批量导入项目
-- **网站爬取**：Playwright 自动爬取项目官网，提取 TG 群链接和 X 链接
-- **TG 解析**：Telethon 解析群管理员、小群离群用户
-- **DM 发送**：
-  - **X (Twitter)**：Playwright 控制浏览器，自动搜索用户并发送 DM（macOS）
-  - **Telegram**：Telethon API 或 OCR 坐标点击（Windows）
+- **数据导入**：从 CrunchBase、RootData、CryptoRank、ChainScope、活动项目 API、Excel / CSV 等来源导入项目
+- **官网爬取**：用 Playwright 扫描项目官网，提取 Telegram 群、X 账号和邮箱
+- **Telegram 解析**：用 Telethon 解析群管理员，扫描小群离群用户
+- **X 关键人搜索**：通过 X People Search 找 CEO / CMO / Growth / Founder 等关键人
+- **文案管理**：在 GUI 中管理 Telegram / X / Email 文案模板和激活状态
+- **批量发送**：
+  - X：连接真实 Chrome CDP，会复用本机 Chrome 登录态
+  - Telegram：macOS 使用 Telegram Web，Windows 使用 OCR / 坐标点击
+  - Email：读取本地配置的 Gmail App Password 发送
 
 ## 安装
 
 ### 1. 安装 Google Chrome
 
-X DM 发送需要通过 Chrome 浏览器完成，请先安装：
+X 发送和部分爬虫依赖 Chrome：
 
 [下载 Google Chrome](https://www.google.com/chrome/)
 
@@ -29,131 +32,200 @@ X DM 发送需要通过 Chrome 浏览器完成，请先安装：
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/lukezhao-tech/outreach-hub/main/scripts/install.sh)"
 ```
 
-这个脚本会自动完成以下所有步骤：
+安装脚本会完成：
 
 | 步骤 | 说明 |
 |------|------|
-| 克隆代码 | 从 GitHub 拉取最新代码 |
-| 检查 Chrome | 确认已安装 Google Chrome |
-| 安装 uv | 如果没有 uv，自动下载安装 |
-| 安装 Python | 通过 uv 下载 Python 3.11（不需要系统自带 Python） |
-| 安装依赖 | `uv sync` 安装所有 pip 包 |
-| 安装浏览器引擎 | `playwright install chromium` 用于网站爬取 |
-| 环境验证 | 检查 tkinter、customtkinter、playwright 是否可用 |
+| 克隆代码 | 拉取 `lukezhao-tech/outreach-hub` |
+| 检查 Chrome | 确认本机已安装 Google Chrome |
+| 安装 uv | 如果没有 uv，会自动安装 |
+| 安装 Python | 通过 uv 安装 Python 3.11 |
+| 安装依赖 | `uv sync` |
+| 安装浏览器引擎 | `playwright install chromium` |
+| 验证环境 | 检查 tkinter、customtkinter、playwright |
 
-整个过程大约 2-3 分钟，取决于网速。**只需运行一次。**
-
-### 安装完成后
-
-安装脚本结束时会自动进入 `outreach-hub` 目录。日常启动（每次新开终端后）：
+### 3. 日常启动
 
 ```bash
-cd outreach-hub    # 安装时 clone 的目录（通常在 home 目录下）
+cd ~/outreach-hub
 ./scripts/start_chrome_cdp.sh
 ```
 
-### 更新到最新版
+这个命令会先启动 Chrome CDP，再启动桌面 GUI。
 
-每次发新版后，在终端跑：
+## 推荐启动方式
 
-```bash
-cd outreach-hub
-git pull
-uv sync    # 若依赖有更新，会自动安装；没更新则秒退
-```
-
-## 配套：[outreach-hub-android](https://github.com/lukezhao-tech/outreach-hub-android)（Android 真机版）
-
-桌面 Playwright 在 X 上反 bot 风控越来越狠时，可以把**关键人搜索 / X DM 发送**两件事搬到手机 X App 里做（uiautomator2 + ADB）。
-
-- **共享数据库**：自动读 `outreach-hub/data/outreach.db`，两边 `x_links` / `x_contacts` / `send_log` / `message_templates` 全互通，冷却期也共享
-- **clone 到同一父目录即可，无需任何配置**：
-  ```bash
-  cd ~   # 或你 clone outreach-hub 的父目录
-  git clone https://github.com/lukezhao-tech/outreach-hub-android.git
-  ```
-- 详细安装和使用见 [outreach-hub-android/README](https://github.com/lukezhao-tech/outreach-hub-android#readme)
-
-## 使用
-
-### 桌面 GUI
+X 对新设备和自动化环境很敏感。最稳的方式是从你日常 Chrome profile 完整同步登录态到项目隔离 profile：
 
 ```bash
-./scripts/start_chrome_cdp.sh
+cd ~/outreach-hub
+./scripts/start_chrome_cdp.sh --system --refresh --profile "lukezhao@taskon.xyz"
 ```
 
-这个脚本会：
-1. 启动 Chrome CDP 模式（后台运行）
-2. 启动桌面 GUI 应用
+也可以用 Chrome profile 目录名：
 
-**X DM 发送流程**：
-1. 在弹出的 Chrome 中登录 Twitter（`x.com`）
-2. 回到应用界面，点击「开始发送」
-3. 等待浏览器打开 DM 页面后，点击「已登录就绪」
-4. 自动逐个发送 DM
+```bash
+./scripts/start_chrome_cdp.sh --system --refresh --profile "Profile 1"
+./scripts/start_chrome_cdp.sh --system --refresh --profile "Default"
+```
 
-#### 启动模式
+`--profile` 支持三类写法：
 
-| 命令 | 说明 |
+| 写法 | 示例 |
 |------|------|
-| `./scripts/start_chrome_cdp.sh` | **默认**。隔离 profile（`data/chrome_cdp_session/`），全新登录 |
-| `./scripts/start_chrome_cdp.sh --system` | **从日常 Chrome 拷贝 cookies / 登录态到隔离 profile**，X 不会判定为新设备。自动扫描所有 profile 挑含 X 登录态的那个 |
-| `./scripts/start_chrome_cdp.sh --system --refresh` | 强制重新拷贝（日常 Chrome 改密码或换号后用一次） |
-| `./scripts/start_chrome_cdp.sh --system --profile "Profile 1"` | 多个 profile 都登录了 X 时，显式指定从哪个拷 |
-| `./scripts/start_chrome_cdp.sh --help` | 查看用法 |
+| Chrome profile 目录名 | `Default`、`Profile 1` |
+| Chrome 显示名 | `Luke Zhao`、`taskon.xyz` |
+| 登录邮箱 | `lukezhao@taskon.xyz` |
 
-#### 何时需要 `--system`？
+启动前必须完全退出日常 Chrome：
 
-X 把脚本启动的「干净 Chrome」视作新设备，首次登录时常常**输完密码又被打回登录页循环**（典型反 bot 软封）。这时改用 `--system`：
-
-```bash
-# 1. 完全退出日常 Chrome（⌘Q，不只是关窗口；脚本要读 cookies SQLite，被写锁会损坏）
-# 2. 启动 outreach-hub
-./scripts/start_chrome_cdp.sh --system
+```text
+Chrome 菜单 -> Quit Google Chrome
+或按 Command + Q
 ```
 
-`--system` 启动时会**扫描你日常 Chrome 的所有 profile**（`Default`、`Profile 1`、`Profile 2` ...），通过 SQLite 直接查每个 profile 的 cookies 数据库，找出含 X `auth_token` 的那个，把它的 cookies / Local State 拷贝到隔离 profile。弹出的 Chrome 直接是登录态，X 把你视作老用户。
+只关闭窗口不够，因为 Chrome 仍可能锁住 cookies / profile 数据库。
 
-- **只有一个 profile 登录了 X**：自动选中，无需任何参数
-- **多个 profile 都登录了 X**：脚本会列出所有候选并报错退出，让你用 `--profile NAME` 显式指定，例如 `--profile "Profile 1"`
-- **没有任何 profile 登录 X**：脚本会要求你先打开日常 Chrome 登录 `https://x.com`，⌘Q 退出再重试
+## X 风控处理
 
-> **为什么不直接复用日常 profile？** Chrome 136+ 出于安全考虑，禁止在默认 profile 上开 `--remote-debugging-port`（防恶意软件偷登录态）。所以脚本必须用独立 profile，再把日常 Chrome 的认证文件搬过去。
+新版做了几件事来降低 X 反机器人触发概率：
 
-⚠️ **使用注意**：
-- 拷贝前必须**完全退出**日常 Chrome（⌘Q，不只是关窗口），否则 cookies SQLite 还被锁住
-- 拷贝只在隔离 profile 首次为空时进行，之后启动会复用上次的状态；日常 Chrome 改密码或换号后跑 `--system --refresh` 重刷一次
-- 拷贝完成后，日常 Chrome 可以随便开，不影响 outreach-hub 这边的隔离 profile
+- CDP 模式默认使用真实 Chrome 指纹，不再注入固定 UA / Client Hints
+- `--system --refresh` 会完整同步所选 Chrome profile，避免旧账号状态残留混入隔离 profile
+- X DM 发送改成更慢的节奏，默认每条后随机等待 `30-90s`
+- 文案输入改成逐字输入，不再瞬间填充
+- 如果 X DM 页面出现 `connecting / disconnected` 或“连接不上网络 / try again”，程序会停止本轮，避免继续撞风控
+
+如果打开 `https://x.com/i/chat` 一直 `connecting / disconnected`：
+
+1. 完全退出日常 Chrome
+2. 重新同步 profile：
+
+   ```bash
+   cd ~/outreach-hub
+   ./scripts/start_chrome_cdp.sh --system --refresh --profile "你的 Chrome 邮箱或 Profile 名"
+   ```
+
+3. 弹出的 Chrome 里手动打开：
+
+   ```text
+   https://x.com/i/chat
+   ```
+
+4. 等 DM 页面稳定连接后，再回 GUI 点「已登录就绪」
+
+如果日常 Chrome 里同一个账号也打不开 DM，那通常是 X 账号或网络侧限制，需要先手动恢复账号状态。
+
+## GUI 使用流程
+
+### 1. 设置
+
+在「设置」页配置：
+
+- Telegram API ID / API Hash
+- Gmail 地址和 App Password
+- DeepSeek API Key（官网爬取需要 LLM 提取时使用）
+- Telegram / X 坐标和 OCR 区域（主要给 Windows 模式使用）
+- DM 冷却时间
+
+### 2. 爬虫
+
+在「爬虫」页选择数据源：
+
+- 官网 -> TG + X
+- Crunchbase -> 官网
+- RootData -> 官网 + TG + X
+- ChainScope
+- TokenFinder
+- Campaign Twitter / KOL
+- CryptoRank
+- X 关键人搜索
+- Excel / CSV 文件导入
+
+每批导入建议填写独立 `source tag`，后续发送时可以按数据源筛选。
+
+### 3. 解析
+
+在「解析」页可以运行：
+
+- TG 管理员解析
+- 离群用户扫描
+
+### 4. 文案
+
+在「文案」页分别维护：
+
+- Telegram 文案
+- X 文案
+- Email 文案
+
+发送前需要激活对应渠道的文案。
+
+### 5. 发送
+
+在「发送」页选择渠道和数据源：
+
+- Telegram 发送
+- X 项目官号发送
+- X 关键人发送
+- Email 发送
+
+X 发送建议先小批量测试，确认 DM 页面稳定后再放大数量。
+
+## 更新
+
+```bash
+cd ~/outreach-hub
+git pull
+uv sync
+```
+
+如果 X 登录态、账号或 Chrome profile 变了，更新后建议重新同步：
+
+```bash
+./scripts/start_chrome_cdp.sh --system --refresh --profile "你的 Chrome 邮箱或 Profile 名"
+```
 
 ## 数据流
 
-```
-数据源导入 -> projects 表
+```text
+数据源导入 -> projects
     |
-    v  爬取官网
-tg_links 表 + x_links 表
+    v
+官网爬取 -> tg_links / x_links / emails
     |
-    v  解析群信息
-tg_handles 表 + tg_left_users 表
+    v
+TG 解析 -> tg_contacts / tg_left_users
     |
-    v  发送 DM
-send_log 表
+    v
+X 关键人搜索 -> x_contacts
+    |
+    v
+发送 -> send_log
 ```
 
-每一步都写入本地 SQLite，重启后自动跳过已处理项。
+所有步骤都写入本地 `data/outreach.db`，重启后会跳过已经处理过的数据。
 
 ## 目录结构
 
-```
+```text
 outreach-hub/
-  main.py              # 桌面 GUI 入口
-  config.py            # 配置（凭证、路径、API）
-  db.py                # 数据层（SQLite）
-  workers/             # 后台任务（爬取、解析、发送）
-  gui/                 # 桌面 GUI 标签页
+  main.py                  # 桌面 GUI 入口
+  config.py                # 路径和默认配置
+  db.py                    # SQLite 数据层
+  gui/                     # CustomTkinter GUI 标签页
+  workers/                 # 爬取、解析、发送等后台任务
   scripts/
-    install.sh             # 一键安装（给新同事用）
-    install_browsers.sh    # 环境准备（install.sh 内部调用）
-    start_chrome_cdp.sh    # 日常启动（Chrome + GUI），加 --system 复用日常 profile
-  data/                # 数据库、session（自动创建，不入版本控制）
+    install.sh             # 一键安装
+    install_browsers.sh    # 安装依赖和浏览器引擎
+    start_chrome_cdp.sh    # 启动 Chrome CDP + GUI
+  data/                    # 数据库、浏览器 session、TG session，本地生成
 ```
+
+## Android 配套项目
+
+当桌面 Playwright 在 X 上触发更强风控时，可以把 X 关键人搜索 / X DM 发送搬到 Android 真机版：
+
+[outreach-hub-android](https://github.com/lukezhao-tech/outreach-hub-android)
+
+Android 版和桌面版共享 `data/outreach.db`，`x_links`、`x_contacts`、`send_log`、`message_templates` 和冷却期互通。
